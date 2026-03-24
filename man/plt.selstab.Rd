@@ -12,7 +12,6 @@ plt.selstab(
   nonz_y,
   palette_values = mpalette,
   blue = TRUE,
-  mm = TRUE,
   k = 1
 )
 }
@@ -30,8 +29,6 @@ plt.selstab(
 \item{palette_values}{Character. Name of a palette for the heatmap. Default is "Teal".}
 
 \item{blue}{Logical. If TRUE, use only scale of blues from palette.}
-
-\item{mm}{Logic. Indicates whether there are multiple measurements or not. Default is True.}
 
 \item{k}{Numeric. Component, default k =1.}
 }
@@ -79,8 +76,8 @@ K = 2                                       # number of components to be estimat
 nonz_x = c(2,5, 10, 20)                     # number of nonzero variables for X
 nonz_y = c(2, 3, 4)                      # number of nonzero variables for Y
 init   = "uniform"                          # type of initialisation
-cca_toscca  = toscca(X, Y, nonz_x, nonz_y, K, alpha_init = init,
+cca_toscca  = toscca(X, Y, nonz_x, nonz_y, K, alpha_init = init, type =1,
 combination = TRUE, K=1, silent = TRUE, toPlot = FALSE)
-plt <- plt.selstab(cca_toscca,X, Y, nonz_x = nonz_x, nonz_y = nonz_y, mm=FALSE)
+plt <- plt.selstab(cca_toscca,X, Y, nonz_x = nonz_x, nonz_y = nonz_y)
 }
 }

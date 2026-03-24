@@ -303,6 +303,8 @@ toscca.core = function(alphaInit, A, B, nonzero_a, nonzero_b, iter = 20, tol = 1
 #' @importFrom stats rnorm
 #' @importFrom graphics matplot
 #' @importFrom graphics title
+#' @importFrom grDevices colorRampPalette
+#' @importFrom scales alpha
 #' @return a list with the following elements:
 
 toscca.folds = function(A, B, nonzero_a, nonzero_b, alpha_init, folds = 1, parallel_logic = FALSE, silent = FALSE, toPlot = TRUE, ATest_res = NULL, BTest_res = NULL) {
@@ -426,18 +428,21 @@ toscca.folds = function(A, B, nonzero_a, nonzero_b, alpha_init, folds = 1, paral
   }
 
   if(toPlot & isFALSE(parallel_logic)) {
-    oldpar <- par(no.readonly = TRUE) # code line i
-    on.exit(par(oldpar))
+    oldpar <- par(no.readonly = TRUE)
+    on.exit({
+      try(par(oldpar), silent = TRUE)
+    })
 
     par(mfrow = c(2, 2))
+    col = alpha(colorRampPalette(mpalette[-1])(ncol(matrix(resultKFold$a, nrow = p))), 0.6)
 
-    matplot(matrix(resultKFold$alpha, nrow = p), type = "l", ylab = "alpha", xlab = "p")
+    matplot(matrix(resultKFold$alpha, nrow = p), type = "l", ylab = "alpha", xlab = "p", col = col)
     title("Full set")
 
     matplot(resultKFold$alpha[,select], type = "l", ylab = "alpha", xlab = "p")
     title("K-fold CV best")
 
-    matplot(matrix(resultKFold$beta, nrow = q), type = "l", ylab = "beta", xlab = "q")
+    matplot(matrix(resultKFold$beta, nrow = q), type = "l", ylab = "beta", xlab = "q", col = col)
     matplot(resultKFold$beta[,select], type = "l", ylab = "beta", xlab = "q")
 
 
@@ -485,6 +490,11 @@ toscca.folds = function(A, B, nonzero_a, nonzero_b, alpha_init, folds = 1, paral
 #' @param typeResid Character. Choice of residualisation technique. Options are basic (default), null and LV.
 #' @param combination Logical. If TRUE, the algorithm will search for the best combination of sparsity choice nonzero_a and nonzero_b for each component. This should be used for exploratory analysis. Default is FALSE.
 #' @param parallel_logic Logical. If TRUE, cross-validation is done in parallel.Default is FALSE.
+#' @param type Numeric. Takes values 1 (standard), 2 (dynamic) or 3 (dynamic for multiple datasets) depending of the toscca variation implemented.
+#' @param model Character. If type == 2, then lme can take values "lme" or "arima".
+#' @param lmeformula Character. Lme type formula to be used if type ==2 and model == "lme".
+#' @param arformula Numeric vector indicating arima parametrisation if type == 2 and model == "arima".
+#' @param predictor data.frame object with variables id and/or time to be used in lmeformula.
 #' @return a list with the following elements:
 #' @examples
 #' #sample size etc
@@ -522,15 +532,17 @@ toscca.folds = function(A, B, nonzero_a, nonzero_b, alpha_init, folds = 1, paral
 #' nonz_x = c(2,5, 10, 20)                     # number of nonzero variables for X
 #' nonz_y = c(2, 3, 4)                      # number of nonzero variables for Y
 #' init   = "uniform"                          # type of initialisation
-#' cca_toscca  = toscca(X, Y, nonz_x, nonz_y, K, alpha_init = init, silent = TRUE, toPlot = FALSE)
+#' cca_toscca  = toscca(X, Y, nonz_x, nonz_y, K, alpha_init = init,
+#' silent = TRUE, toPlot = FALSE, type = 1)
 #'
 #' @return List with estimated toscca parameters.
 #' @export
-toscca = function(A, B, nonzero_a, nonzero_b, K = 1, alpha_init = c("eigen", "random", "uniform"), folds = 1, silent = FALSE, toPlot = TRUE, typeResid = "basic", combination = FALSE, parallel_logic = FALSE) {
+toscca = function(A, B, nonzero_a, nonzero_b, K = 1, alpha_init = c("eigen", "random", "uniform"), folds = 1, type = NA, silent = FALSE, toPlot = TRUE, typeResid = "basic", combination = FALSE, parallel_logic = FALSE, model = "lme", lmeformula = " ~ -1 + time + (1|id)", predictor = NULL, arformula = c(1,0,0)) {
 
-  # checks
-
-
+  # general checks -------
+  if(is.na(type)) {
+    stop("You must specify type: Numeric. Takes values 1 (standard), 2 (dynamic) or 3 (dynamic for multiple datasets) depending of the toscca variation implemented.")
+  }
   if(K != length(nonzero_a) & isFALSE(combination)) {
     if(K > 1 & length(nonzero_a) == 1) {
       nonzero_a = rep(nonzero_a, K)
@@ -547,57 +559,122 @@ toscca = function(A, B, nonzero_a, nonzero_b, K = 1, alpha_init = c("eigen", "ra
     }
   }
 
+  if(length(alpha_init) != 1) {
 
-  # set up
-  cancorComponents = matrix(NA, nrow = K, ncol = 1)
-  alphaComponents  = matrix(NA, nrow = ncol(A), K)
-  betaComponents   = matrix(NA, nrow = ncol(B), K)
-  InitComponents   = matrix(NA, nrow = ncol(A), K)
+    alpha_init <- "uniform"
 
-  for(k in 1: K) {
-    if(isFALSE(silent)) cat("\n__________________________________________ \n For component K = ", k, ": \n")
-    if(k==1) {
-      Ea = A
-      Eb = B
+    message("Invalid initialisation. Switched to uniform")
+  } else if(!(alpha_init %in% c("eigen", "random", "uniform"))) {
+    alpha_init <- "uniform"
 
-    } else if(k > 1) {
-
-
-      Ea = residualisation(vec = matrix(alphaComponents[, k - 1], nrow = ncol(Ea)),  mat = Ea, type = typeResid)
-      Eb = residualisation(vec = matrix(betaComponents[, k - 1], nrow = ncol(Eb)),  mat = Eb, type = typeResid)
-
-      Ea = standardVar(Ea)
-      Eb = standardVar(Eb)
-    }
-    if(combination) {
-      result = toscca.folds(A = Ea, B = Eb, nonzero_a, nonzero_b, alpha_init, folds, silent = silent, toPlot = toPlot, ATest_res = A, BTest_res = B, parallel_logic = parallel_logic)
-
-    } else {
-      nonzero_aK = nonzero_a[k]
-      nonzero_bK = nonzero_b[k]
-      result = toscca.folds(A = Ea, B = Eb, nonzero_aK, nonzero_bK, alpha_init, folds, silent = silent, toPlot = toPlot, ATest_res = A, BTest_res = B, parallel_logic = parallel_logic)
-
-    }
-
-
-    cancorComponents[k]  = result$cancor
-    alphaComponents[, k] = result$alpha
-    betaComponents[, k]  = result$beta
-
-
+    message("Invalid initialisation. Switched to uniform")
   }
 
 
-  alpha = sapply(1:K, function(p) standardVar(alphaComponents[,p], centre = FALSE, normalise = TRUE))
-  beta  = sapply(1:K, function(q) standardVar(betaComponents[,q], centre = FALSE, normalise = TRUE))
+  # mis
+  if(type == 1) {
+    # checks
+
+    if(!("matrix" %in% class(A)) | !("matrix" %in% class(B))) {
+      stop("Data is not in matrix format. Columns must be numeric")
+    }
 
 
-  resultSCCA = list(cancor = cancorComponents,
-                    alpha  = alpha,
-                    beta   = beta
-  )
+    # set up
+    cancorComponents = matrix(NA, nrow = K, ncol = 1)
+    alphaComponents  = matrix(NA, nrow = ncol(A), K)
+    betaComponents   = matrix(NA, nrow = ncol(B), K)
+    InitComponents   = matrix(NA, nrow = ncol(A), K)
 
-  return(resultSCCA)
+    for(k in 1: K) {
+      if(isFALSE(silent)) cat("\n__________________________________________ \n For component K = ", k, ": \n")
+      if(k==1) {
+        Ea = A
+        Eb = B
+
+      } else if(k > 1) {
+
+
+        Ea = residualisation(vec = matrix(alphaComponents[, k - 1], nrow = ncol(Ea)),  mat = Ea, type = typeResid)
+        Eb = residualisation(vec = matrix(betaComponents[, k - 1], nrow = ncol(Eb)),  mat = Eb, type = typeResid)
+
+        Ea = standardVar(Ea)
+        Eb = standardVar(Eb)
+      }
+      if(combination) {
+        result = toscca.folds(A = Ea, B = Eb, nonzero_a, nonzero_b, alpha_init, folds, silent = silent, toPlot = toPlot, ATest_res = A, BTest_res = B, parallel_logic = parallel_logic)
+
+      } else {
+        nonzero_aK = nonzero_a[k]
+        nonzero_bK = nonzero_b[k]
+        result = toscca.folds(A = Ea, B = Eb, nonzero_aK, nonzero_bK, alpha_init, folds, silent = silent, toPlot = toPlot, ATest_res = A, BTest_res = B, parallel_logic = parallel_logic)
+
+      }
+
+
+      cancorComponents[k]  = result$cancor
+      alphaComponents[, k] = result$alpha
+      betaComponents[, k]  = result$beta
+
+
+    }
+
+
+    alpha = sapply(1:K, function(p) standardVar(alphaComponents[,p], centre = FALSE, normalise = TRUE))
+    beta  = sapply(1:K, function(q) standardVar(betaComponents[,q], centre = FALSE, normalise = TRUE))
+
+
+    output = list(cancor = cancorComponents,
+                      alpha  = alpha,
+                      beta   = beta
+    )
+
+  }
+
+  if(type == 2) {
+    res_k = list()
+
+    A.temp = A
+    B.temp = B
+    for (k in 1:K) {
+      if(k > 1) {
+        # residualise for subsequent components
+        A.temp = data.frame(A.temp[,c(1,2)],toscca::residualisation(as.matrix(A.temp[,-c(1,2)]), res_k[[k-1]]$alpha, type = typeResid) )
+        B.temp = data.frame(B.temp[,c(1,2)],toscca::residualisation(as.matrix(B.temp[,-c(1,2)]), res_k[[k-1]]$beta, type = typeResid) )
+
+        nz_a_gen = as.numeric(table(res_k[[k-1]]$alpha != 0)[2])
+        nz_b_gen = as.numeric(table(res_k[[k-1]]$beta != 0)[2])
+      }
+
+      res_k[[k]] <- tosccamm(A.temp, B.temp, folds = folds,
+                             nonzero_a = nonzero_a, nonzero_b = nonzero_b,
+                             model = model, lmeformula = lmeformula, predictor = predictor,
+                             toPlot = toPlot, silent = silent,
+                             parallel_logic = parallel_logic)
+
+    }
+
+    alpha   = sapply(1:K, function(k) res_k[[k]]$alpha)
+    beta    = sapply(1:K, function(k) res_k[[k]]$beta)
+    cancor  = sapply(1:K, function(k) res_k[[k]]$cancor)
+    me_x  = sapply(1:K, function(k) res_k[[k]]$me_x)
+    me_y  = sapply(1:K, function(k) res_k[[k]]$me_y)
+    nonzero_a  = sapply(1:K, function(k) res_k[[k]]$nonzero_a)
+    nonzero_b  = sapply(1:K, function(k) res_k[[k]]$nonzero_b)
+
+    output = list(alpha = alpha,
+                         beta = beta,
+                         cancor = cancor,
+                         me_x = me_x,
+                         me_y = me_y,
+                         nonzero_a = nonzero_a,
+                         nonzero_b = nonzero_b)
+  }
+
+  output$type <- type
+
+  class(output) <- "toscca_object"
+  return(output)
 }
 
 #' Permutation testing for toscca
@@ -656,11 +733,13 @@ toscca = function(A, B, nonzero_a, nonzero_b, K = 1, alpha_init = c("eigen", "ra
 #' nonz_x = c(2,5, 10, 20)                     # number of nonzero variables for X
 #' nonz_y = c(1, 2, 3, 4)                      # number of nonzero variables for Y
 #' init   = "uniform"                          # type of initialisation
-#' cca_toscca  = toscca(X, Y, nonz_x, nonz_y, K, alpha_init = init, silent = TRUE, toPlot = FALSE)
+#' cca_toscca  = toscca(X, Y, nonz_x, nonz_y, K, alpha_init = init,
+#' silent = TRUE, toPlot = FALSE, type = 1)
 #' \donttest{
 #' #dont run due to parallelisation.
 #' cc = cca_toscca$cancor
-#' perm_toscca = toscca.perm(X, Y, nonz_x, nonz_y, K = K, init, draws = 10, cancor = cc, ncores = 2)
+#' perm_toscca = toscca.perm(X, Y, nonz_x, nonz_y, K = K, init, draws = 10,
+#' cancor = cc, ncores = 2)
 #' }
 #' @return List with permuted correlations and p-values.
 #' @export
@@ -679,7 +758,7 @@ toscca.perm = function(A, B, nonzero_a, nonzero_b, K, alpha_init = c("eigen", "r
       if(isFALSE(silent)) progressBar(draws, d)
 
       ASample = A[sample(1:nrow(A), nrow(A)),]
-      t(toscca.tStat(toscca(A = ASample, B = B, K = K, alpha_init = alpha_init, combination = FALSE, nonzero_a=nonzero_a, nonzero_b=nonzero_b, toPlot = FALSE, silent = TRUE, parallel_logic = FALSE)$cancor, ASample, B, C = nuisanceVar, type = testStatType)[["tStatistic"]]) #off-sample cancor
+      t(toscca.tStat(toscca(A = ASample, B = B, K = K, alpha_init = alpha_init, combination = FALSE, nonzero_a=nonzero_a, nonzero_b=nonzero_b, toPlot = FALSE, silent = TRUE, parallel_logic = FALSE, type =1)$cancor, ASample, B, C = nuisanceVar, type = testStatType)[["tStatistic"]]) #off-sample cancor
 
     }
 
@@ -708,8 +787,10 @@ toscca.perm = function(A, B, nonzero_a, nonzero_b, K, alpha_init = c("eigen", "r
     ylim = c(min((modes(permDensity)$y), min(perm[,getWhich(testStatistic, max)])), max((modes(permDensity)$y) + margin, max(h$counts) + margin))
 
 
-    oldpar <- par(no.readonly = TRUE) # code line i
-    on.exit(par(oldpar))
+    oldpar <- par(no.readonly = TRUE)
+    on.exit({
+      try(par(oldpar), silent = TRUE)
+    })
 
     par(mfrow=c(1,1))
     hist(perm[, getWhich(testStatistic, max)], breaks = draws/2, xlab = "Canonical Correlation",
@@ -748,7 +829,7 @@ toscca.lv <- function(data, alpha, beta) {
 # tosccamm ----------------------------------------------------------------
 
 # toscca-mm core
-tosccamm.core = function(alphaInit, A, B, nonzero_a, nonzero_b, iter = 20, tol = 10^(-6), silent = FALSE, model = c("arima", "lme"), arformula = c(1,0,0), lmeformula = " ~ -1 + time + (1|id)")
+tosccamm.core = function(alphaInit, A, B, nonzero_a, nonzero_b, iter = 20, tol = 10^(-6), silent = FALSE, model = c("arima", "lme"), arformula = c(1,0,0), lmeformula = " ~ -1 + time + (1|id)", predictor = NULL)
 {
 
 
@@ -779,6 +860,12 @@ tosccamm.core = function(alphaInit, A, B, nonzero_a, nonzero_b, iter = 20, tol =
   id_b = B[,"id"]
   time_a = A[,"time"]
   time_b = B[,"time"]
+
+  if(!is.null(predictor)) {
+    predictor_a =  merge(A[, c("id", "time")], predictor, by.x = "id", by.y = "id", all.x = TRUE)
+    predictor_b =  merge(B[, c("id", "time")], predictor, by.x = "id", by.y = "id", all.x = TRUE)
+
+  }
 
   A = as.matrix(A[, 3:ncol(A)])
   B = as.matrix(B[, 3:ncol(B)])
@@ -830,8 +917,15 @@ tosccamm.core = function(alphaInit, A, B, nonzero_a, nonzero_b, iter = 20, tol =
     }
 
     if(model == "lme") {
-      me = sapply(1:ncol(alpha), function(j) lme4::lmer(as.formula(paste("gamma", lmeformula)), data = data.frame(gamma = gamma[,j], time = time_a, id = id_a), REML = TRUE))
-      pred_me = sapply(1:ncol(alpha), function(j) stats::predict(me[[j]], newdata = data.frame(time = time_b, id = id_b), allow.new.levels = TRUE, re.form = NULL))
+      if(is.null(predictor)) {
+        me = sapply(1:ncol(alpha), function(j) lme4::lmer(as.formula(paste("gamma", lmeformula)), data = data.frame(gamma = gamma[,j], time = time_a, id = id_a), REML = TRUE))
+        pred_me = sapply(1:ncol(alpha), function(j) stats::predict(me[[j]], newdata = data.frame(time = time_b, id = id_b), allow.new.levels = TRUE, re.form = NULL))
+
+      } else {
+        me = sapply(1:ncol(alpha), function(j) lme4::lmer(as.formula(paste("gamma", lmeformula)), data = data.frame(gamma = gamma[,j], time = time_a, id = id_a, predictor = predictor_a[,3]), REML = TRUE))
+        pred_me = sapply(1:ncol(alpha), function(j) stats::predict(me[[j]], newdata = data.frame(time = time_b, id = id_b, predictor = predictor_b[,3]), allow.new.levels = TRUE, re.form = NULL))
+
+      }
 
     }
 
@@ -882,8 +976,15 @@ tosccamm.core = function(alphaInit, A, B, nonzero_a, nonzero_b, iter = 20, tol =
     }
 
     if(model == "lme") {
-      me = sapply(1:ncol(beta), function(j) lme4::lmer(as.formula(paste("zeta", lmeformula)), data = data.frame(zeta = zeta[,j], time = time_b, id = id_b), REML = TRUE))
-      pred_me = sapply(1:ncol(beta), function(j) stats::predict(me[[j]], newdata = data.frame(time = time_a, id = id_a), allow.new.levels = TRUE, re.form = NULL))
+      if(is.null(predictor)) {
+        me = sapply(1:ncol(beta), function(j) lme4::lmer(as.formula(paste("zeta", lmeformula)), data = data.frame(zeta = zeta[,j], time = time_b, id = id_b), REML = TRUE))
+        pred_me = sapply(1:ncol(beta), function(j) stats::predict(me[[j]], newdata = data.frame(time = time_a, id = id_a), allow.new.levels = TRUE, re.form = NULL))
+
+      } else {
+        me = sapply(1:ncol(beta), function(j) lme4::lmer(as.formula(paste("zeta", lmeformula)), data = data.frame(zeta = zeta[,j], time = time_b, id = id_b, predictor = predictor_b[,3]), REML = TRUE))
+        pred_me = sapply(1:ncol(beta), function(j) stats::predict(me[[j]], newdata = data.frame(time = time_a, id = id_a, predictor = predictor_a[,3]), allow.new.levels = TRUE, re.form = NULL))
+
+      }
 
     }
     alpha = t(A) %*% pred_me
@@ -910,12 +1011,19 @@ tosccamm.core = function(alphaInit, A, B, nonzero_a, nonzero_b, iter = 20, tol =
   }
 
   if(model == "lme") {
-    me_x = sapply(1:ncol(alpha), function(j) lme4::lmer(as.formula(paste("gamma", lmeformula)), data = data.frame(gamma = gamma[,j], time = time_a, id = id_a), REML = TRUE))
-    # pred_x = sapply(1:ncol(alpha), function(j) predict(me_x[[j]], newdata = data.frame(time = time_b, id = id_b), allow.new.levels = TRUE, re.form = NULL))
-    # lmer(as.formula(paste("gamma", lmeformula)), data = data.frame(gamma = gamma, time = time_a, id = id_a), REML = TRUE)
-    me_y = sapply(1:ncol(beta), function(j) lme4::lmer(as.formula(paste("zeta", lmeformula)), data = data.frame(zeta = zeta[,j], time = time_b, id = id_b), REML = TRUE))
-    # pred_y = sapply(1:ncol(beta), function(j) predict(me_y[[j]], newdata = data.frame(time = time_a, id = id_a), allow.new.levels = TRUE, re.form = NULL))
-    # me_y = lmer(as.formula(paste("zeta", lmeformula)), data = data.frame(zeta = zeta, time = time_b, id = id_b), REML = TRUE)
+    if(is.null(predictor)) {
+      me_x = sapply(1:ncol(alpha), function(j) lme4::lmer(as.formula(paste("gamma", lmeformula)), data = data.frame(gamma = gamma[,j], time = time_a, id = id_a), REML = TRUE))
+      # pred_x = sapply(1:ncol(alpha), function(j) predict(me_x[[j]], newdata = data.frame(time = time_b, id = id_b), allow.new.levels = TRUE, re.form = NULL))
+      # lmer(as.formula(paste("gamma", lmeformula)), data = data.frame(gamma = gamma, time = time_a, id = id_a), REML = TRUE)
+      me_y = sapply(1:ncol(beta), function(j) lme4::lmer(as.formula(paste("zeta", lmeformula)), data = data.frame(zeta = zeta[,j], time = time_b, id = id_b), REML = TRUE))
+      # pred_y = sapply(1:ncol(beta), function(j) predict(me_y[[j]], newdata = data.frame(time = time_a, id = id_a), allow.new.levels = TRUE, re.form = NULL))
+      # me_y = lmer(as.formula(paste("zeta", lmeformula)), data = data.frame(zeta = zeta, time = time_b, id = id_b), REML = TRUE)
+
+    } else {
+      me_x = sapply(1:ncol(alpha), function(j) lme4::lmer(as.formula(paste("gamma", lmeformula)), data = data.frame(gamma = gamma[,j], time = time_a, id = id_a, predictor = predictor_a[,3]), REML = TRUE))
+      me_y = sapply(1:ncol(beta), function(j) lme4::lmer(as.formula(paste("zeta", lmeformula)), data = data.frame(zeta = zeta[,j], time = time_b, id = id_b, predictor = predictor_b[,3]), REML = TRUE))
+
+    }
   } else {
     me_x = NULL
     me_y = NULL
@@ -923,7 +1031,9 @@ tosccamm.core = function(alphaInit, A, B, nonzero_a, nonzero_b, iter = 20, tol =
 
   # alpha[alpha!=0] = scale(alpha[alpha!=0])
   # beta[beta!=0]   = scale(beta[beta!=0])
-  return(list(a = alpha, b = beta, conv = e, iter = i, me_x = me_x, me_y = me_y))
+  if(is.null(predictor)) return(list(a = alpha, b = beta, conv = e, iter = i, me_x = me_x, me_y = me_y))
+  if(!is.null(predictor)) return(list(a = alpha, b = beta, conv = e, iter = i, me_x = me_x, me_y = me_y, predictor = list(predictor_a, predictor_b)))
+
 }
 
 # toscca-mm folds
@@ -939,76 +1049,18 @@ tosccamm.core = function(alphaInit, A, B, nonzero_a, nonzero_b, iter = 20, tol =
 #' @param folds Integer. Indicates number of folds to perform.
 #' @param parallel_logic Logical. TRUE to parallelise folds. Default is FALSE.
 #' @param silent Logical. TRUE to keep silent output messages. Default is FALSE.
+#' @param toPlot Logical. If TRUE, plot will be generated automatically showing the estimated canonical weights. Default is TRUE.
+#' @param predictor data.frame object with variables id and/or time to be used in lmeformula.
 #' @param ATest_res NULL. Keep NULL.
 #' @param BTest_res NULL. Keep NULL.
 #' @param model Character. c("lme", "ar"). Model to fit longitudinal latent space.
 #' @param lmeformula Character. LME formula. Default is " ~ -1 + time + (1|id)".
 #' @param arformula Numeric vector. Choice of ARIMA. Default is c(1,0,0).
 #' @importFrom MASS mvrnorm
-#' @return Canonical vectors for k components.
-#' @examples
-#' \donttest{
-#' # example code
-#' #sample size etc
-#' N = 10
-#' p = 25
-#' q = 5
-#' X0 = list()
-#' Y0 = list()
-#'
-#' #Some associations with the true signal
-#' cwa = (6:10) / 10
-#' cwb  = -(2:3) / 10
-#'
-#' alpha = rep(0, p)
-#' beta = rep(0, q)
-#'
-#' loc_alpha = 1:length(alpha)
-#' loc_beta  = 1:length(beta)
-#'
-#' alpha[loc_alpha] = cwa
-#' beta[loc_beta] = cwb
-#'
-#' sg = matrix(c(1, 0.6, 0.3, rep(0, 2),
-#'               0.6, 1, 0.6, 0.3, rep(0, 1),
-#'               0.3, 0.6, 1, 0.6, 0.3,
-#'               rep(0,1), 0.3, 0.6, 1, 0.6,
-#'               rep(0,2), 0.3, 0.6, 1), ncol = 5)
-#' for(i in 1:N)
-#' {
-#'   times = 1:5
-#'   Zi1 = (sin(100*times))^times +   times * 0.65 +rnorm(1,0,0.95)
-#'   Zi = cbind(Zi1)
-#'   #Simulate data and add some noise
-#'   X0i = sapply(1:p, function(a) MASS::mvrnorm(1, (Zi %*% t(alpha))[,a], Sigma = sg))
-#'   Y0i = sapply(1:q, function(a) MASS::mvrnorm(1, (Zi %*% t(beta))[,a], Sigma = sg))
-#'
-#'   colnames(X0i) = paste0("X", 1:ncol(X0i))
-#'   colnames(Y0i) = paste0("Y", 1:ncol(Y0i))
-#'   #Check the simulated cross correlation
-#'   #image(cor(X0i, Y0i))
-#'
-#'   #Remove some observations
-#'   # p_observed = 1
-#'   X0i = cbind(id=i, time=times, X0i)#[rbinom(length(times),1,p_observed)==1,]
-#'   Y0i = cbind(id=i, time=times, Y0i)#[rbinom(length(times),1,p_observed)==1,]
-#'
-#'   X0[[i]] = X0i
-#'   Y0[[i]] = Y0i
-#' }
-#'
-#' X0 = do.call("rbind", X0)
-#' Y0 = do.call("rbind", Y0)
-#'
-#' X = data.frame(X0); Y = data.frame(Y0)
-#' nonz_a = c(2, 5, 10, 20)
-#' nonz_b =  c(2, 3, 4)
-#'
-#' mod <- tosccamm(X, Y, folds = 2, nonzero_a = nonz_a, nonzero_b = nonz_b, silent = TRUE)
-#' }
+#' @importFrom scales alpha
+#' @importFrom grDevices colorRampPalette
 #' @return List with estimated tosccamm parameters.
-#' @export
-tosccamm = function(A, B, nonzero_a, nonzero_b, folds = 1, parallel_logic = FALSE, silent = FALSE, ATest_res = NULL, BTest_res = NULL, model = "lme", lmeformula = " ~ -1 + time + (1|id)", arformula = c(1,0,0)) {
+tosccamm = function(A, B, nonzero_a, nonzero_b, folds = 1, parallel_logic = FALSE, toPlot = TRUE, silent = FALSE, ATest_res = NULL, BTest_res = NULL, model = "lme", lmeformula = " ~ -1 + time + (1|id)", predictor = NULL, arformula = c(1,0,0)) {
   # N = min(nrow(A), nrow(B)) # observations
   # p = ncol(A) - 2 # predictor variables (not really since CCA is symmetric)
   # q = ncol(B) - 2# response variables (not really since CCA is symmetric)
@@ -1165,10 +1217,10 @@ tosccamm = function(A, B, nonzero_a, nonzero_b, folds = 1, parallel_logic = FALS
   N = min(nrow(A), nrow(B)) # observations
   p = ncol(A) - 2 # predictor variables (not really since CCA is symmetric)
   q = ncol(B) - 2# response variables (not really since CCA is symmetric)
-  s = rep(1:folds, length.out=length(unique(A$id)))
+  # s = rep(1:folds, length.out=length(unique(A$id)))
   # s = s[1:N]
   # s = s[sample(1:length(s), length(s))]
-  if(folds == 1) s[sample(1:N, 0.25*N)] = 2
+  # if(folds == 1) s[sample(1:length(unique(A$id)), 0.25*length(unique(A$id)))] = 2
   nonzeroGrid = expand.grid(nonzero_a, nonzero_b)
   h = nrow(nonzeroGrid)
   canCor_a = matrix(NA, folds, h)
@@ -1180,6 +1232,8 @@ tosccamm = function(A, B, nonzero_a, nonzero_b, folds = 1, parallel_logic = FALS
   betaMat  <- list()
 
   for (f in 1:folds) {
+    s = rep(1, length(unique(A$id)))
+    s[sample(1:length(unique(A$id)), 0.25*length(unique(A$id)))] = 2
     fold_ids <- unique(A$id)[s == f]
     ATrain = A[A$id %in% fold_ids, ]
     BTrain = B[B$id %in% fold_ids, ]
@@ -1197,22 +1251,38 @@ tosccamm = function(A, B, nonzero_a, nonzero_b, folds = 1, parallel_logic = FALS
 
     # if(isFALSE(silent)) progressBar(folds, f)
 
-    resultKFold = tosccamm.core(alphaInit = runif(ncol(A)-2), A = ATrain, B = BTrain, nonzero_a = nonzeroGrid[,1], nonzero_b = nonzeroGrid[,2], model = model, lmeformula = lmeformula, silent = silent)
+    resultKFold = tosccamm.core(alphaInit = runif(ncol(A)-2), A = ATrain, B = BTrain, nonzero_a = nonzeroGrid[,1], nonzero_b = nonzeroGrid[,2], model = model, lmeformula = lmeformula, predictor = predictor, silent = silent)
 
     alphaMat[[f]] <- resultKFold$a
     betaMat[[f]]  <- resultKFold$b
 
-    gamma_a = sapply(1:ncol(alphaMat[[f]]), function(j) predict(resultKFold$me_x[[j]], newdata = data.frame(time = ATest[,"time"], id = ATest[,"id"]), allow.new.levels = TRUE, re.form = NULL))
+    if(is.null(predictor)) {
+      gamma_a = sapply(1:ncol(alphaMat[[f]]), function(j) predict(resultKFold$me_x[[j]], newdata = data.frame(time = ATest[,"time"], id = ATest[,"id"]), allow.new.levels = TRUE, re.form = NULL))
+      gamma_b = sapply(1:ncol(alphaMat[[f]]), function(j) predict(resultKFold$me_x[[j]], newdata = data.frame(time = BTest[,"time"], id = BTest[,"id"]), allow.new.levels = TRUE, re.form = NULL))
+
+      zeta_a = sapply(1:ncol(betaMat[[f]]), function(j) predict(resultKFold$me_y[[j]], newdata = data.frame(time = ATest[,"time"], id = ATest[,"id"]), allow.new.levels = TRUE, re.form = NULL))
+      zeta_b = sapply(1:ncol(betaMat[[f]]), function(j) predict(resultKFold$me_y[[j]], newdata = data.frame(time = BTest[,"time"], id = BTest[,"id"]), allow.new.levels = TRUE, re.form = NULL))
+
+    } else {
+      predictor_a =  merge(ATest[, c("id", "time")], predictor, by.x = "id", by.y = "id", all.x = TRUE)
+      predictor_b =  merge(BTest[, c("id", "time")], predictor, by.x = "id", by.y = "id", all.x = TRUE)
+
+      gamma_a = sapply(1:ncol(alphaMat[[f]]), function(j) predict(resultKFold$me_x[[j]], newdata = data.frame(time = ATest[,"time"], id = ATest[,"id"], predictor =  predictor_a[,3]), allow.new.levels = TRUE, re.form = NULL))
+      gamma_b = sapply(1:ncol(alphaMat[[f]]), function(j) predict(resultKFold$me_x[[j]], newdata = data.frame(time = BTest[,"time"], id = BTest[,"id"], predictor = predictor_b[,3]), allow.new.levels = TRUE, re.form = NULL))
+
+      zeta_a = sapply(1:ncol(betaMat[[f]]), function(j) predict(resultKFold$me_y[[j]], newdata = data.frame(time = ATest[,"time"], id = ATest[,"id"], predictor =  predictor_a[,3]), allow.new.levels = TRUE, re.form = NULL))
+      zeta_b = sapply(1:ncol(betaMat[[f]]), function(j) predict(resultKFold$me_y[[j]], newdata = data.frame(time = BTest[,"time"], id = BTest[,"id"], predictor = predictor_b[,3]), allow.new.levels = TRUE, re.form = NULL))
+
+    }
     gamma_a = data.frame(id = ATest$id, time = ATest$time, x = gamma_a)
     gamma_a = data.frame(time = unique(sort(round(gamma_a$time,2))), sapply(1:nrow(nonzeroGrid), function(j) aggregate(gamma_a[,j+2], by = list(round(gamma_a$time,2)), FUN =mean)$x)) #scale_rm(gamma_a, centre = FALSE)
-    zeta_a = sapply(1:ncol(betaMat[[f]]), function(j) predict(resultKFold$me_y[[j]], newdata = data.frame(time = ATest[,"time"], id = ATest[,"id"]), allow.new.levels = TRUE, re.form = NULL))
+
     zeta_a = data.frame(id = ATest$id, time = ATest$time, x = zeta_a)
     zeta_a  = data.frame(time = unique(sort(round(zeta_a$time,2))), sapply(1:nrow(nonzeroGrid), function(j) aggregate(zeta_a[,j+2], by = list(round(zeta_a$time,2)), FUN =mean)$x)) #scale_rm(zeta_a, centre = TRUE)
 
-    gamma_b = sapply(1:ncol(alphaMat[[f]]), function(j) predict(resultKFold$me_x[[j]], newdata = data.frame(time = BTest[,"time"], id = BTest[,"id"]), allow.new.levels = TRUE, re.form = NULL))
     gamma_b = data.frame(id = BTest$id, time = BTest$time, x = gamma_b)
     gamma_b = data.frame(time = unique(sort(round(gamma_b$time,2))), sapply(1:nrow(nonzeroGrid), function(j) aggregate(gamma_b[,j+2], by = list(round(gamma_b$time,2)), FUN =mean)$x)) #scale_rm(gamma_b, centre = FALSE)
-    zeta_b = sapply(1:ncol(betaMat[[f]]), function(j) predict(resultKFold$me_y[[j]], newdata = data.frame(time = BTest[,"time"], id = BTest[,"id"]), allow.new.levels = TRUE, re.form = NULL))
+
     zeta_b = data.frame(id = BTest$id, time = BTest$time, x = zeta_b)
     zeta_b  = data.frame(time = unique(sort(round(zeta_b$time,2))), sapply(1:nrow(nonzeroGrid), function(j) aggregate(zeta_b[,j+2], by = list(round(zeta_b$time,2)), FUN =mean)$x)) #scale_rm(zeta_b, centre = TRUE)
 
@@ -1220,11 +1290,18 @@ tosccamm = function(A, B, nonzero_a, nonzero_b, folds = 1, parallel_logic = FALS
     # zettaT <- aggregate(. ~ id + time, data = zeta, FUN = mean)
 
     tv = sort(union(unique(ATest$time), unique(BTest$time)))
-    l = sapply(1:length(tv), function(v) length(intersect(ATest[ATest$time==v, ]$id, BTest[BTest$time==v, ]$id)))
-    v = which(l==max(l))[1]
-    iv = intersect(ATest[ATest$time==v, ]$id, BTest[BTest$time==v, ]$id)
-    g = data.frame(id = ATest$id, time = ATest$time, as.matrix(ATest[,-c(1,2)])%*%alphaMat[[f]]); e = data.frame(id = BTest$id, time = BTest$time, as.matrix(BTest[,-c(1,2)])%*%betaMat[[f]])
-    m = sapply(1:ncol(alphaMat[[f]]), function(x) abs(cor(g[g$id %in% iv & g$time==v, x+2], e[e$id %in% iv & e$time==v, x+2])))
+    l = sapply(tv, function(v) length(intersect(ATest[ATest$time ==
+                                                        v, ]$id, BTest[BTest$time == v, ]$id)))
+    v = which(l == max(l))[1]
+    iv = intersect(ATest[ATest$time == tv[v], ]$id, BTest[BTest$time ==
+                                                            tv[v], ]$id)
+    g = data.frame(id = ATest$id, time = ATest$time, as.matrix(ATest[,
+                                                                     -c(1, 2)]) %*% alphaMat[[f]])
+    e = data.frame(id = BTest$id, time = BTest$time, as.matrix(BTest[,
+                                                                     -c(1, 2)]) %*% betaMat[[f]])
+    m = sapply(1:ncol(alphaMat[[f]]), function(x) abs(cor(g[g$id %in%
+                                                              iv & g$time == tv[v], x + 2], e[e$id %in% iv & e$time ==
+                                                                                                tv[v], x + 2])))
 
     if(ncol(gamma_a) + ncol(zeta_a) > 2) canCor_a[f,]  = abs(sapply(2:ncol(gamma_a), function(j) cor(gamma_a[,j], zeta_a[,j])))
     if(ncol(gamma_a) + ncol(zeta_a) == 2) canCor_a[f,] = abs(cor(gamma_a, zeta_a))
@@ -1261,15 +1338,41 @@ tosccamm = function(A, B, nonzero_a, nonzero_b, folds = 1, parallel_logic = FALS
 
   }
 
-  result     = tosccamm.core(alphaInit =  runif(ncol(A)-2), A = A, B = B, nonzero_a = nonzeroGrid[select, 1], nonzero_b = nonzeroGrid[select, 2], silent = TRUE,  model = model, arformula = arformula, lmeformula = lmeformula)
+  result     = tosccamm.core(alphaInit =  runif(ncol(A)-2), A = A, B = B, nonzero_a = nonzeroGrid[select, 1], nonzero_b = nonzeroGrid[select, 2], silent = TRUE,  model = model, arformula = arformula, lmeformula = lmeformula, predictor = predictor)
+
+
+  if(toPlot & isFALSE(parallel_logic)) {
+    oldpar <- par(no.readonly = TRUE)
+    on.exit({
+      try(par(oldpar), silent = TRUE)
+    })
+
+    par(mfrow = c(2, 2))
+
+    col = alpha(colorRampPalette(mpalette[-1])(ncol(matrix(resultKFold$a, nrow = p))), 0.6)
+
+
+    matplot(matrix(resultKFold$a, nrow = p), type = "l", ylab = "alpha", xlab = "p", col = col)
+    title("Full set")
+
+    matplot(resultKFold$a[,select], type = "l", ylab = "alpha", xlab = "p", col = col[select])
+    title("K-fold CV best")
+
+    matplot(matrix(resultKFold$b, nrow = q), type = "l", ylab = "beta", xlab = "q", col = col)
+    matplot(resultKFold$b[,select], type = "l", ylab = "beta", xlab = "q", col = col[select])
+
+
+
+  }
+
 
 
   if(nrow(nonzeroGrid) > 1) {
     resultSCCA = list(cancor = canCorPrint,
                       alpha  = result$a,
                       beta   = result$b,
-                      me_x   = result$me_x,
-                      me_y   = result$me_y,
+                      me_x   = try(result$me_x),
+                      me_y   = try(result$me_y),
                       # alphaMat       = alphaMat,
                       # betaMat        = betaMat,
                       # position       = select,
@@ -1280,8 +1383,8 @@ tosccamm = function(A, B, nonzero_a, nonzero_b, folds = 1, parallel_logic = FALS
     resultSCCA = list(cancor = canCorPrint,
                       alpha  = result$a,
                       beta   = result$b,
-                      me_x   = result$me_x,
-                      me_y   = result$me_y,
+                      me_x   = try(result$me_x),
+                      me_y   = try(result$me_y),
                       # alphaMat       = alphaMat,
                       # betaMat        = betaMat,
                       # position       = select,
@@ -1381,7 +1484,7 @@ tosccamm = function(A, B, nonzero_a, nonzero_b, folds = 1, parallel_logic = FALS
 #' nonz_a = c(2, 5, 10, 20)
 #' nonz_b =  c(2, 3, 4)
 #'
-#' mod <- tosccamm(X, Y, folds = 2, nonzero_a = nonz_a, nonzero_b = nonz_b, silent = TRUE)
+#' mod <- toscca(X, Y, folds = 2, nonzero_a = nonz_a, nonzero_b = nonz_b, silent = TRUE, type = 2)
 #' nza <- mod$nonzero_a
 #' nzb <- mod$nonzero_b
 #' cc  <- mod$cancor
@@ -1496,8 +1599,10 @@ toscamm.perm = function (A, B, nonzero_a, nonzero_b, K=1, folds = 1, toPlot = FA
                                                              max)])), max((modes(permDensity)$y) + margin, max(h$counts) +
                                                                             margin))
 
-    oldpar <- par(no.readonly = TRUE) # code line i
-    on.exit(par(oldpar))
+    oldpar <- par(no.readonly = TRUE)
+    on.exit({
+      try(par(oldpar), silent = TRUE)
+    })
 
     par(mfrow = c(1, 1))
     #   hist(perm[, getWhich(testStatistic, max)], breaks = draws/2,
@@ -1595,8 +1700,10 @@ toscamm.perm = function (A, B, nonzero_a, nonzero_b, K=1, folds = 1, toPlot = FA
     permDensity = density(perm[, getWhich(testStatistic,
                                           max)])
 
-    oldpar <- par(no.readonly = TRUE) # code line i
-    on.exit(par(oldpar))
+    oldpar <- par(no.readonly = TRUE)
+    on.exit({
+      try(par(oldpar), silent = TRUE)
+    })
 
     par(mfrow = c(1, 1))
     hist(perm[, getWhich(testStatistic, max)], breaks = draws/2,
@@ -1623,3 +1730,24 @@ toscamm.perm = function (A, B, nonzero_a, nonzero_b, K=1, folds = 1, toPlot = FA
   if(isFALSE(silent)) message(cat("Empirical p-values:", pValues, sep = "\n"))
   return(list(perm_estimate = perm, p_values = pValues))
 }
+
+
+
+
+
+# permutation -------------------------------------------------------------
+
+# permutation = function(A, B, toscca_object, draws, parallel_logic) {
+#   type = toscca_object$type
+#   if(type == 1) {
+#     output = toscca.perm(X, Y, nonz_x, nonz_y, K = K, init, draws = draws, cancor = cc, ncores = 2, type =1, parallel_logic = parallel_logic)
+#   }
+#
+#   if(type == 2) {
+#     output <- toscamm.perm((A, B, nonzero_a, nonzero_b, K=1, folds = 1, toPlot = FALSE, draws = 1000,
+# cancor, bootCCA = NULL, silent = TRUE, parallel_logic = TRUE,
+# nuisanceVar = 0, testStatType = "CC", model = "lme", lmeformula = " ~ 0 + poly(time,3) + (1|id)", arformula = NULL, ncores = NULL)
+#   }
+#
+#   return(output)
+# }

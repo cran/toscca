@@ -188,39 +188,32 @@ powerMethod = function(mat, vec, tol = 10^(-6), maxIter = 500, silent = TRUE) {
 #' X = standardVar(X0)
 #' Y = standardVar(Y0)
 #' @export
-scale_rm <- function(mat, origin = NULL, centre = FALSE) {
+scale_rm = function (mat, origin = NULL, centre = FALSE)
+{
   ncols = ncol(mat)
   nrows = nrow(mat)
-  if(is.null(origin)) { # get min collection date
-    origin_rows = as.numeric(unlist(sapply(unique(mat$id), function(x) which(mat$time==min(mat[mat$id==x,]$time)))))
+  if (is.null(origin)) {
+    # origin_rows = as.numeric(unlist(sapply(unique(mat$id),
+    #                                        function(x) which(mat$time == min(mat[mat$id == x, ]$time)))))
+    origin_rows <- sapply(unique(mat$id), function(x) {
+      rows <- which(mat$id == x)
+      rows[which.min(mat$time[rows])]
+    }
+    )
   } else {
     origin_rows = which(mat$time == origin)
   }
-
-  # scale first columnwise
-  cent = sapply(3:ncols, function(j) mean(as.matrix(mat[origin_rows,j])))
-  dist   = sapply(3:ncols, function(j) sqrt(sum((mat[,j] - cent[j-2])**2)/max(1, length(mat[,j]-1))))
-  mat[,3:ncols] = sapply(3:ncols, function(j) mat[,j]/dist[j-2])                       # faster than sweep
-  # centre whole dataset
-  if(centre) {
-    gen_cent = mean(as.matrix(mat[origin_rows,3:ncols]))
-    mat[,3:ncols]  = sapply(3:ncols, function(j) mat[,j] - gen_cent)
+  cent = sapply(3:ncols, function(j) mean(as.matrix(mat[origin_rows, j])))
+  dist = sapply(3:ncols, function(j) sqrt(sum((mat[, j] - cent[j - 2])^2)/max(1, length(mat[, j] - 1))))
+  mat[, 3:ncols] = sapply(3:ncols, function(j) mat[, j]/dist[j - 2])
+  if (centre) {
+    gen_cent = mean(as.matrix(mat[origin_rows, 3:ncols]))
+    mat[, 3:ncols] = sapply(3:ncols, function(j) mat[, j] -
+                              gen_cent)
   }
-  # cent = sapply(3:ncols, function(j) mean(mat[origin_rows,j]))
-  # if(centre) {
-  #   mat[,3:ncols] <- sapply(3:ncols, function(j) mat[,j] - cent[j-2])
-  #   # mat[,3:ncols] <- sweep(mat[3:ncols], 2L, cent, check.margin=FALSE)
-  #   dist = sapply(3:ncols, function(j) sqrt(sum(mat[,j]**2)/max(1, length(mat[,j]-1))))
-  #
-  # } else {
-  #   dist = sapply(3:ncols, function(j) sqrt(sum((mat[,j] - cent[j-2])**2)/max(1, length(mat[,j]-1))))
-  #
-  # }
-  # mat_st = sweep(mat[,3:ncols], 2, dist, "/", check.margin = FALSE)
-  # mat_st = as.matrix(cbind(mat[,1:2], mat_st), nrow = nrows, ncol = ncols)
-  # colnames(mat_st) <- colnames(mat)
   return(data.frame(mat))
 }
+
 
 
 # modes -------------------------------------------------------------------
@@ -389,7 +382,6 @@ myHeatmap <- function(mat, palette_values = mpalette, blue = NULL, xlab = "", yl
 #' @param nonz_x Numeric vector. Sparsity levels of X.
 #' @param nonz_y Numeric vector. Sparsity levels of Y.
 #' @param palette_values Character. Name of a palette for the heatmap. Default is "Teal".
-#' @param mm Logic. Indicates whether there are multiple measurements or not. Default is True.
 #' @param blue Logical. If TRUE, use only scale of blues from palette.
 #' @param k Numeric. Component, default k =1.
 #' @return No return value, called for selection stability pot.
@@ -431,14 +423,13 @@ myHeatmap <- function(mat, palette_values = mpalette, blue = NULL, xlab = "", yl
 #' nonz_x = c(2,5, 10, 20)                     # number of nonzero variables for X
 #' nonz_y = c(2, 3, 4)                      # number of nonzero variables for Y
 #' init   = "uniform"                          # type of initialisation
-#' cca_toscca  = toscca(X, Y, nonz_x, nonz_y, K, alpha_init = init,
+#' cca_toscca  = toscca(X, Y, nonz_x, nonz_y, K, alpha_init = init, type =1,
 #' combination = TRUE, K=1, silent = TRUE, toPlot = FALSE)
-#' plt <- plt.selstab(cca_toscca,X, Y, nonz_x = nonz_x, nonz_y = nonz_y, mm=FALSE)
+#' plt <- plt.selstab(cca_toscca,X, Y, nonz_x = nonz_x, nonz_y = nonz_y)
 
 #' }
 #' @export
-plt.selstab=
-  function (object, X, Y, nonz_x, nonz_y, palette_values = mpalette, blue = TRUE, mm = TRUE, k=1)
+plt.selstab = function (object, X, Y, nonz_x, nonz_y, palette_values = mpalette, blue = TRUE, k=1)
   {
     index <- count <- NULL
     if(is.null(nonz_x) & is.null(nonz_y)) {
@@ -450,14 +441,15 @@ plt.selstab=
 
       if(is.null(mat)) stop("Provide sparsity levels for stability selection plots.")
     }
+    type = object$type
 
-    if(mm){
+    if(type == 2){
       run_cca <- function(i) {
-        cca_res = tosccamm(
+        cca_res = toscca(
           X, Y,
           nonzero_a = nonz_x[i],
           nonzero_b = nonz_y[1],
-          silent = TRUE
+          silent = TRUE, type =2
         )
         list(alpha = cca_res$alpha[, 1], beta = cca_res$beta[, 1], cancor = cca_res$cancor[1])
       }
@@ -465,7 +457,7 @@ plt.selstab=
     } else {
       run_cca <- function(i) {
         cca_res = toscca(
-          X, Y,
+          X, Y, type = 1,
           nonz_x[i],
           nonz_y[1], K = 1, "uniform",
           combination = FALSE, silent = TRUE, toPlot = FALSE)
@@ -562,8 +554,7 @@ plt.selstab=
 #' getWhich(rnorm(100), max)
 #'
 #' @export
-getWhich =
-  function (data, fun)
+getWhich = function (data, fun)
   {
     fun = match.fun(fun)
     position = (which(data == fun(data)))
@@ -720,3 +711,108 @@ toscca.lv <- function(data, alpha, beta) {
 
 
 
+
+
+
+# helpers -----------------------------------------------------------------
+#' Plot heatmap of cv w.r.t. the penalty parameter perfotmance.
+#'
+#' This function plots cca for different thresholds
+#'
+#' @param object toscca object.
+#' @param ... further arguments passed to or from methods.
+#' @importFrom utils menu
+#' @return No return value, called for plotting heatmap.
+#' @examples
+#' \donttest{
+#' # example code
+#' #sample size etc
+#' N = 10
+#' p = 25
+#' q = 5
+#' # noise
+#' X0 = sapply(1:p, function(x) rnorm(N))
+#' Y0 = sapply(1:q, function(x) rnorm(N))
+#'
+#' colnames(X0) = paste0("x", 1:p)
+#' colnames(Y0) = paste0("y", 1:q)
+#'
+#' # signal
+#' Z1 = rnorm(N,0,10)
+#'
+#'
+#' #Some associations with the true signal
+#' alpha = (6:10) / 10
+#' beta  = -(2:3) / 10
+#'
+#' loc_alpha = 1:length(alpha)
+#' loc_beta  = 1:length(beta)
+#'
+#' for(j in 1:length(alpha))
+#'   X0[, loc_alpha[j]] =  alpha[j] * Z1 + rnorm(N,0,0.03)
+#'
+#' for(j in 1:length(beta))
+#'   Y0[, loc_beta[j]] =  beta[j] * Z1 + rnorm(N,0,0.03)
+#'
+#' # performa toscca
+#' X = standardVar(X0)
+#' Y = standardVar(Y0)
+#' K = 2                                       # number of components to be estimated
+#' nonz_x = c(2,5, 10, 20)                     # number of nonzero variables for X
+#' nonz_y = c(2, 3, 4)                      # number of nonzero variables for Y
+#' init   = "uniform"                          # type of initialisation
+#' cca_toscca  = toscca(X, Y, nonz_x, nonz_y, K, alpha_init = init, type =1,
+#' combination = TRUE, K=1, silent = TRUE, toPlot = FALSE)
+#' summary(cca_toscca)
+#' }
+#' @export
+summary.toscca_object <- function(object, ...) {
+  mod_type <- c("Sparse CCA (1)", "Longitudinal Sparse CCA (2)", "Multi-Logitudinal Sparse CCA (3)")
+  type = object$type
+  K = length(object$cancor)
+
+  if(type == 3) dlist = length(object$cw_list)
+
+  cat("Model: ", mod_type[type], "\n")
+  cat("Components: ", K, "\n")
+
+  cc_tab <- as.table(object$cancor)
+  dimnames(cc_tab) <- list(K = c(1:K))
+  cat("Canonical Correlations: \n")
+  print(cc_tab)
+  cat("-------------------------------- \n")
+
+  #   sparsity
+  if(type < 3) {
+    nz_a <- sapply(1:K, function(k) length(object$alpha[object$alpha[,k]==0,k]))
+    nz_b <- sapply(1:K, function(k) length(object$beta[object$beta[,k]==0,k]))
+    cw_tab <- as.table(cbind(nz_a, nz_b))
+  } else {
+    cw <- sapply(1:K, function(k) sapply(1:dlist, function(d) length(object$cw[[d]][object$cw[[d]][,k]==0,k])))
+    cw_tab <- as.table(cw)
+  }
+  dimnames(cw_tab) <- list(K = c(1:K), Dataset = unlist(ifelse(type < 3, list(c("A", "B")), list(paste0("X", 1:dlist)))))
+
+  if(type > 1) {
+    m <-menu(c("Yes", "No"), title="Do you want to print the longitudinal models' summary?")
+
+    if(m==1) {
+      for (k in 1:K) {
+        cat("-------------------------------- \n")
+        cat("Longitudinal model for k = ", k, ": dataset 1 \n")
+        print(summary(object$me_x))
+
+        cat("\n--\n\nLongitudinal model for k = ", k, ": dataset 2 \n")
+        print(summary(object$me_y))
+        cat("-------------------------------- \n")
+
+      }
+    }
+  }
+}
+
+# plot.toscca_object <- function(object, ...) {
+#   if(type == 1) {
+#
+#   }
+# }
