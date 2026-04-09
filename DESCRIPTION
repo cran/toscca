@@ -1,6 +1,6 @@
 Package: toscca
 Title: Thresholded Ordered Sparse CCA
-Version: 0.1.1
+Version: 1.0
 Authors@R: 
     person("Nuria", "Senar", , "n.senarvilladeamigo@amsterdamumc.nl", role = c("aut", "cre"),
            comment = c(ORCID = "0000-0002-1004-5785"))
@@ -17,8 +17,8 @@ Depends: R (>= 3.5)
 VignetteBuilder: knitr
 Config/testthat/edition: 3
 NeedsCompilation: no
-Packaged: 2026-03-24 13:25:32 UTC; PC
+Packaged: 2026-04-09 13:34:14 UTC; PC
 Author: Nuria Senar [aut, cre] (ORCID: <https://orcid.org/0000-0002-1004-5785>)
 Maintainer: Nuria Senar <n.senarvilladeamigo@amsterdamumc.nl>
 Repository: CRAN
-Date/Publication: 2026-03-24 13:50:02 UTC
+Date/Publication: 2026-04-09 13:50:02 UTC

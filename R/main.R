@@ -434,16 +434,16 @@ toscca.folds = function(A, B, nonzero_a, nonzero_b, alpha_init, folds = 1, paral
     })
 
     par(mfrow = c(2, 2))
-    col = alpha(colorRampPalette(mpalette[-1])(ncol(matrix(resultKFold$a, nrow = p))), 0.6)
+    col = colorRampPalette(mpalette[-1])(ncol(matrix(resultKFold$a, nrow = p)))
 
-    matplot(matrix(resultKFold$alpha, nrow = p), type = "l", ylab = "alpha", xlab = "p", col = col)
+    matplot(matrix(resultKFold$alpha, nrow = p), pch = 19, ylab = expression(w^(1)), xlab = expression(p^(1)), col = alpha(col, 0.6))
     title("Full set")
 
-    matplot(resultKFold$alpha[,select], type = "l", ylab = "alpha", xlab = "p")
+    matplot(resultKFold$alpha[,select], pch = 19, ylab = expression(w^(1)), xlab = expression(p^(1)), col = col[select])
     title("K-fold CV best")
 
-    matplot(matrix(resultKFold$beta, nrow = q), type = "l", ylab = "beta", xlab = "q", col = col)
-    matplot(resultKFold$beta[,select], type = "l", ylab = "beta", xlab = "q")
+    matplot(matrix(resultKFold$beta, nrow = q), pch = 19, ylab = expression(w^(2)), xlab = expression(p^(2)), col = alpha(col, 0.6))
+    matplot(resultKFold$beta[,select], pch = 19, ylab = expression(w^(2)), xlab = expression(p^(2)), col = col[select])
 
 
   }
@@ -767,7 +767,7 @@ toscca.perm = function(A, B, nonzero_a, nonzero_b, K, alpha_init = c("eigen", "r
       # cat("|", rep(".", d), rep(" ", (draws-d)), "|", (d/draws)*100, "%\r")
       if(isFALSE(silent)) progressBar(draws, d)
       ASample = A[sample(1:nrow(A), nrow(A)),]
-      perm[d,] = toscca.tStat(toscca(A = ASample, B = B, K = K, alpha_init = alpha_init, combination = FALSE, nonzero_a=nonzero_a, nonzero_b=nonzero_b, toPlot = FALSE, silent = TRUE)$cancor, ASample, B, C = nuisanceVar, type = testStatType)[["tStatistic"]] #off-sample cancor
+      perm[d,] = toscca.tStat(toscca(A = ASample, B = B, K = K, alpha_init = alpha_init, combination = FALSE, nonzero_a=nonzero_a, nonzero_b=nonzero_b, toPlot = FALSE, silent = TRUE, type = 1)$cancor, ASample, B, C = nuisanceVar, type = testStatType)[["tStatistic"]] #off-sample cancor
 
 
     }
@@ -797,10 +797,10 @@ toscca.perm = function(A, B, nonzero_a, nonzero_b, K, alpha_init = c("eigen", "r
          xlim = xlim, ylim =  ylim, main = paste0("Distribution under de Null - ", testStatType, " Statistic") , col =  scales::alpha("#01768c", 0.2))
     lines(permDensity, col="black", lwd = 2)
     epdfPlot(perm[,getWhich(testStatistic, max)], discrete = FALSE, density.arg.list = NULL, plot.it = TRUE,
-             add = TRUE, epdf.col = "steelblue", epdf.lwd = 3 * par("cex"), epdf.lty = 1,
-             curve.fill = FALSE, curve.fill.col = "steelblue", main = NULL, xlab = NULL, ylab = NULL)
-    abline(v=testStatistic, col = "#e86d07", lwd = 2)
-    legend("topleft", c("Empirical pdf", "density", "model canCor"), col = c("steelblue", "black", "red"), lty=c(2, 1, 1), cex=0.8)
+             add = TRUE, epdf.col = mpalette[5], epdf.lwd = 3 * par("cex"), epdf.lty = 1,
+             curve.fill = FALSE, curve.fill.col = mpalette[5], main = NULL, xlab = NULL, ylab = NULL)
+    abline(v=testStatistic, col = mpalette[2], lwd = 2)
+    legend("topleft", c("Empirical pdf", "density", "model canCor"), col = c(mpalette[5], "black", mpalette[9]), lty=c(2, 1, 1), cex=0.8)
     text(x = as.character(testStatistic), y = 0.9*par('usr')[4], labels = as.character(1:K), cex = 0.9)
 
 
@@ -1352,14 +1352,14 @@ tosccamm = function(A, B, nonzero_a, nonzero_b, folds = 1, parallel_logic = FALS
     col = alpha(colorRampPalette(mpalette[-1])(ncol(matrix(resultKFold$a, nrow = p))), 0.6)
 
 
-    matplot(matrix(resultKFold$a, nrow = p), type = "l", ylab = "alpha", xlab = "p", col = col)
+    matplot(matrix(resultKFold$a, nrow = p), pch = 19, ylab = expression(w^(1)), xlab = expression(p^(1)), col = col)
     title("Full set")
 
-    matplot(resultKFold$a[,select], type = "l", ylab = "alpha", xlab = "p", col = col[select])
+    matplot(resultKFold$a[,select], pch = 19, ylab = expression(w^(1)), xlab = expression(p^(1)), col = col[select])
     title("K-fold CV best")
 
-    matplot(matrix(resultKFold$b, nrow = q), type = "l", ylab = "beta", xlab = "q", col = col)
-    matplot(resultKFold$b[,select], type = "l", ylab = "beta", xlab = "q", col = col[select])
+    matplot(matrix(resultKFold$b, nrow = q), pch = 19, ylab = expression(w^(2)), xlab = expression(p^(2)), col = col)
+    matplot(resultKFold$b[,select], pch = 19, ylab = expression(w^(2)), xlab = expression(p^(2)), col = col[select])
 
 
 
@@ -1735,19 +1735,5 @@ toscamm.perm = function (A, B, nonzero_a, nonzero_b, K=1, folds = 1, toPlot = FA
 
 
 
-# permutation -------------------------------------------------------------
 
-# permutation = function(A, B, toscca_object, draws, parallel_logic) {
-#   type = toscca_object$type
-#   if(type == 1) {
-#     output = toscca.perm(X, Y, nonz_x, nonz_y, K = K, init, draws = draws, cancor = cc, ncores = 2, type =1, parallel_logic = parallel_logic)
-#   }
-#
-#   if(type == 2) {
-#     output <- toscamm.perm((A, B, nonzero_a, nonzero_b, K=1, folds = 1, toPlot = FALSE, draws = 1000,
-# cancor, bootCCA = NULL, silent = TRUE, parallel_logic = TRUE,
-# nuisanceVar = 0, testStatType = "CC", model = "lme", lmeformula = " ~ 0 + poly(time,3) + (1|id)", arformula = NULL, ncores = NULL)
-#   }
-#
-#   return(output)
-# }
+

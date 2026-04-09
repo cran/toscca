@@ -816,3 +816,17 @@ summary.toscca_object <- function(object, ...) {
 #
 #   }
 # }
+
+
+
+# data --------------------------------------------------------------------
+#
+# function (url = "https://tibshirani.su.domains/PMA/breastdata.rda")
+# {
+#   tmpdir <- tempdir()
+#   filepath <- file.path(tmpdir, "breastdata.rda")
+#   utils::download.file(url, filepath)
+#   e <- new.env()
+#   load(filepath, envir = e)
+#   e$breastdata
+# }
